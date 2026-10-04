@@ -1,12 +1,15 @@
 # Optional, UNDEPLOYED preview blueprint. Review billing before applying.
+# Do not deploy before resolving the security findings in docs/STOCK_ANALYSIS_SITE.md.
 # No persistent disk: server-side history/reports can be lost on recreation.
 # For durable personal use, prefer the upstream Docker Compose named volumes.
+# Plan ID verified against https://render.com/docs/blueprint-spec on 2026-10-04.
 services:
   - type: web
     name: jay-stock-analysis
     runtime: docker
-    plan: starter
+    plan: 1c-2g
     region: singapore
+    branch: feat/stock-analysis-site
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /live
