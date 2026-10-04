@@ -82,6 +82,6 @@ test('desktop/mobile research workflow preserves uncertain-send recovery', { tim
     writeFileSync(path.join(output,'browser.json'),JSON.stringify({browser:await send('Browser.getVersion'),viewports:[[1280,900],[390,844]],requests,exceptions,external},null,2));
   } finally {
     ws?.close();chrome.kill();await new Promise(r=>chrome.exitCode!==null?r():chrome.once('exit',r));
-    await new Promise(r=>server.close(r));rmSync(profile,{recursive:true,force:true});
+    await new Promise(r=>server.close(r));rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
   }
 });
