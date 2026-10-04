@@ -7,10 +7,35 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
+function debuggerEndpoint(chrome,browserPath) {
+  return new Promise((resolve,reject)=>{
+  let log='';
+  const finish=(error,endpoint)=>{
+    clearTimeout(timer);chrome.off('error',onError);chrome.off('exit',onExit);chrome.stderr.off('data',onData);
+    if(error)reject(error);else resolve(endpoint);
+  };
+  const onError=error=>finish(error);
+  const onExit=(code,signal)=>finish(new Error(`Chromium exited before debugger (${code ?? signal}): ${log}`));
+  const onData=chunk=>{log=(log+chunk).slice(-65536);const match=log.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(match)finish(null,match[1]);};
+  const timer=setTimeout(()=>finish(new Error(`Chromium debugger unavailable (${browserPath}): ${log}`)),10000);
+  chrome.stderr.on('data',onData);chrome.once('error',onError);chrome.once('exit',onExit);
+});
+}
+
+// Each browser owns a process group so launchers and profile-writing children
+// are stopped together. Only ESRCH (already stopped) is tolerated.
+async function stopBrowser(chrome) {
+  if(!chrome.pid)return;
+  const signal=kind=>{try{process.kill(-chrome.pid,kind);}catch(error){if(error.code!=='ESRCH')throw error;}};
+  const exited=chrome.exitCode!==null||chrome.signalCode!==null?Promise.resolve():new Promise(resolve=>chrome.once('exit',resolve));
+  const timer=setTimeout(()=>signal('SIGKILL'),1000);
+  try{signal('SIGTERM');await exited;}finally{clearTimeout(timer);signal('SIGKILL');}
+}
+
 // Real Chromium against the production bundle and a deliberately fake API.
 // No Python backend, real market source, model, broker or credential is used.
 test('desktop/mobile research workflow preserves uncertain-send recovery', { timeout: 45000 }, async () => {
-  const browserPath = ['/usr/bin/chromium','/usr/bin/google-chrome','/opt/google/chrome/chrome'].find(existsSync);
+  const browserPath = ['/usr/bin/google-chrome','/opt/google/chrome/chrome','/usr/bin/chromium'].find(existsSync);
   assert.ok(browserPath, 'Chromium unavailable: browser gate is blocked, not skipped');
   const requests=[];
   const mime={'.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.woff2':'font/woff2','.png':'image/png'};
@@ -30,14 +55,10 @@ test('desktop/mobile research workflow preserves uncertain-send recovery', { tim
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const base=`http://127.0.0.1:${server.address().port}`;
   const profile=mkdtempSync(path.join(tmpdir(),'jay-browser-'));
-  const chrome=spawn(browserPath,['--headless','--no-sandbox','--disable-gpu','--no-first-run','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
+  const chrome=spawn(browserPath,['--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{detached:true,stdio:['ignore','ignore','pipe']});
   let ws;
   try {
-    const endpoint=await new Promise((resolve,reject)=>{
-      let log='';const timer=setTimeout(()=>reject(new Error('Chromium debugger unavailable')),10000);
-      chrome.stderr.on('data',chunk=>{log+=chunk;const match=log.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(match){clearTimeout(timer);resolve(match[1]);}});
-      chrome.once('error',reject);
-    });
+    const endpoint=await debuggerEndpoint(chrome,browserPath);
     ws=new WebSocket(endpoint);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true});});
     let id=0;const pending=new Map();const exceptions=[];const external=[];
     function send(method,params={},sessionId) {return new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});ws.send(JSON.stringify({id:key,method,params,sessionId}));});}
@@ -79,9 +100,32 @@ test('desktop/mobile research workflow preserves uncertain-send recovery', { tim
     await command('Page.reload');await until('document.body?.innerText.includes("服务已连接")');
     assert.ok(await evaluate('[...document.querySelectorAll("button")].some(x=>x.getAttribute("aria-label")==="删除自选 贵州茅台")'));
     assert.deepEqual(exceptions,[]);assert.deepEqual(external,[]);
-    writeFileSync(path.join(output,'browser.json'),JSON.stringify({browser:await send('Browser.getVersion'),viewports:[[1280,900],[390,844]],requests,exceptions,external},null,2));
+    writeFileSync(path.join(output,'browser.json'),JSON.stringify({browserExecutable:browserPath,browser:await send('Browser.getVersion'),viewports:[[1280,900],[390,844]],requests,exceptions,external},null,2));
   } finally {
-    ws?.close();chrome.kill();await new Promise(r=>chrome.exitCode!==null?r():chrome.once('exit',r));
+    ws?.close();await stopBrowser(chrome);
     await new Promise(r=>server.close(r));rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
   }
+});
+
+// Exercise actual early process exits, signals and spawn errors; none are skips.
+test('browser startup failures retain diagnostics and reject promptly', { timeout: 5000 }, async () => {
+  const exits=spawn(process.execPath,['-e',"process.stderr.write('startup-fixture');setTimeout(()=>process.exit(7),20)"],{stdio:['ignore','ignore','pipe']});
+  await assert.rejects(debuggerEndpoint(exits,process.execPath),/before debugger \(7\): startup-fixture/);
+  const signaled=spawn(process.execPath,['-e','process.kill(process.pid,"SIGTERM")'],{stdio:['ignore','ignore','pipe']});
+  await assert.rejects(debuggerEndpoint(signaled,process.execPath),/before debugger \(SIGTERM\)/);
+  const missing=spawn('/__quality_missing_browser__',[],{stdio:['ignore','ignore','pipe']});
+  await assert.rejects(debuggerEndpoint(missing,'/__quality_missing_browser__'),/ENOENT/);
+});
+
+test('isolated browser process groups stop persistent profile writers', { timeout: 5000 }, async () => {
+  const profile=mkdtempSync(path.join(tmpdir(),'jay-browser-group-'));
+  const marker=path.join(profile,'writer');
+  const writer=`const fs=require('node:fs');process.on('SIGTERM',()=>{});setInterval(()=>{fs.mkdirSync(${JSON.stringify(profile)},{recursive:true});fs.writeFileSync(${JSON.stringify(marker)},'fixture');},10);`;
+  const leader=spawn(process.execPath,['-e',`require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(writer)}],{stdio:'ignore'});process.on('SIGTERM',()=>{});setInterval(()=>{},1000);`],{detached:true,stdio:'ignore'});
+  try {
+    for(let i=0;i<100&&!existsSync(marker);i++)await delay(10);
+    assert.ok(existsSync(marker),'profile writer did not start');
+    await stopBrowser(leader);rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+    await delay(100);assert.equal(existsSync(profile),false,'profile writer survived browser shutdown');
+  } finally {await stopBrowser(leader);rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });
