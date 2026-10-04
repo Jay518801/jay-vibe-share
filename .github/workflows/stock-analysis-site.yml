@@ -1,31 +1,34 @@
-name: Stock analysis site
+name: Stock analysis quality
 on:
   push:
-    branches: [feat/stock-analysis-site]
-    paths: ['frontend/**', '.github/workflows/stock-analysis-site.yml']
+    branches: [dev, 'feat/**', 'fix/**']
   pull_request:
-    paths: ['frontend/**', '.github/workflows/stock-analysis-site.yml']
+    branches: [dev]
 permissions:
   contents: read
 jobs:
-  frontend:
+  quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          node-version: '22'
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.22.0'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: node --experimental-strip-types --test tests/stockResearch.test.mjs
-      - run: npm run build
-      - uses: actions/upload-artifact@v4
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run test:quality
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
-          name: stock-analysis-frontend
-          path: frontend/dist
+          name: stock-analysis-quality
+          path: |
+            frontend/quality-artifacts
           retention-days: 7

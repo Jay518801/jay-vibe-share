@@ -1,6 +1,6 @@
-import {test} from 'node:test';
+import {test} from 'vitest';
 import assert from 'node:assert/strict';
-import {normalizeInstrument as norm, searchInstruments, parseWatchlist, buildResearchPrompt as prompt, chinaDate, createResearchSession, sendResearch, parseSessions, requestJSON, RESEARCH_TYPES} from '../src/lib/stockResearch.ts';
+import {normalizeInstrument as norm, searchInstruments, parseWatchlist, buildResearchPrompt as prompt, chinaDate, createResearchSession, sendResearch, parseSessions, requestJSON, RESEARCH_TYPES} from '../stockResearch';
 const base=()=>({instruments:[norm('600519')],kind:'overview',months:12,question:'',asOf:'2026-10-04'});
 for(const [input,expected] of [['600519','600519.SH'],['sh600519','600519.SH'],['600519.ss','600519.SH'],['000001','000001.SZ'],['sz:300750','300750.SZ'],['920001','920001.BJ'],['BJ.830001','830001.BJ'],['700','00700.HK'],['0700.hk','00700.HK'],['HK00700','00700.HK'],['腾讯控股','00700.HK']]) test(`normalizes ${input}`,()=>assert.equal(norm(input).symbol,expected));
 for(const value of ['', '0','00000.HK','600519.SZ','000001.SH','123456','999999.BJ','AAPL','../secret','<script>','7000.SH']) test(`rejects ${value || '(empty)'}`,()=>assert.throws(()=>norm(value)));
@@ -18,3 +18,4 @@ test('send failure is propagated and never automatically retried',async()=>{let 
 test('send rejects invalid IDs and content lengths',async()=>{for(const [id,content] of [['../x','x'],['ok',''],['ok','x'.repeat(5001)]]) await assert.rejects(sendResearch(async()=>({} ),id,content));});
 test('session list schema is checked',()=>{assert.throws(()=>parseSessions({}));assert.deepEqual(parseSessions([{},null]),[]);assert.equal(parseSessions([{session_id:'s',title:'t',status:'idle',updated_at:'2026-10-04'}]).length,1);});
 test('HTTP wrapper uses Authorization header, same origin, bounded timeout and useful errors',async()=>{const original=globalThis.fetch;try{let call;globalThis.fetch=async(...args)=>{call=args;return new Response('[]',{status:200});};assert.deepEqual(await requestJSON('/sessions',{}, {Authorization:'Bearer test-only'}),[]);assert.equal(call[0],'/sessions');assert.equal(call[1].headers.Authorization,'Bearer test-only');assert.equal(call[1].credentials,'same-origin');assert.ok(call[1].signal instanceof AbortSignal);for(const status of [401,403,501,502]){globalThis.fetch=async()=>new Response('{}',{status});await assert.rejects(requestJSON('/sessions'));}}finally{globalThis.fetch=original;}});
+test('unknown HK instrument remains HK without a catalog identity',()=>assert.equal(norm('12345.HK').market,'HK'));

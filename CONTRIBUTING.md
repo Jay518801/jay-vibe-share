@@ -225,3 +225,60 @@ is broken: runner geography, holidays and upstream changes need checking.
 The 14-day window is a coarse freshness alarm, not a market-calendar guarantee.
 Reports are retained for 30 days. No authenticated source or broker order path
 is exercised.
+
+## Stock research development gate
+
+Custom A-share/Hong Kong Web work is integrated into `dev`, not `main`.
+Start a feature branch from the reviewed `dev` baseline. The quality workflow
+runs on `dev`, `feat/**`, `fix/**`, and pull requests targeting `dev`; it has
+read-only repository permissions and does not deploy or write back to GitHub.
+
+From `frontend/`, with the lockfile dependencies installed:
+
+```bash
+npm ci --ignore-scripts --no-audit --no-fund
+npm run test:quality
+```
+
+`test:coverage` is an alias for the same complete gate. It runs the existing
+Vitest suite plus stock-workspace and gate regression tests, V8 coverage,
+TypeScript/Vite production build, and a real Chromium smoke test against a
+local fixture API. Chromium must already be available at one of the paths
+listed in `tests/stockBrowser.test.mjs`; missing browser support fails rather
+than skips. Tests do not call a real model, market-data service, or broker.
+
+The debt baseline remains `a8e547543057594b04cc36c898580c5ed68318fd`.
+All changed executable JS/TS files, including new untracked tools, are checked
+as whole files (stricter than changed lines). V8/Istanbul maps determine the
+four integer metrics. A version-matched V8 provider independently converts the
+same transformed source with zero runtime functions, then requires exact complete
+statement/function/branch maps, including every branch arm. No intersection or
+heuristic count can reduce the denominator. Source-map contents must match disk.
+Configured class-method exclusions and all converter-supported ignore-comment
+families (including `node:coverage`) are forbidden. Missing/invalid mappings, suppression comments, changed
+source fingerprints, and any Python production change fail closed. Python
+function-coverage tooling has not been implemented. Tests, declaration files,
+non-executable files and deleted files are listed explicitly in the report;
+a zero denominator is recorded with a reason, not called 100%.
+
+Production reachability starts at HTML scripts and executable gate tools, and
+follows imports, reexports and literal dynamic imports using the TypeScript
+resolver. Local declaration-file resolutions may shadow executable JavaScript
+and are treated as uncertain. Computed or unresolved dependencies include all local
+JS/TS files. Explicit relative runtime paths are also followed independently of
+TypeScript extension substitution. Vite’s actual production-build module graph
+is checked separately: any test-named runtime module not included in measured
+scope blocks the gate. A production-reachable test-named file is never exempted.
+
+Reports live in a fresh ignored `frontend/quality-artifacts/run-*/` directory,
+with coverage under its `coverage/` subdirectory. A unique run ID binds the
+collector envelope to that run; real child exit failures prevent final reporting.
+The report binds the baseline, parent HEAD, source/test/config/lockfile hashes,
+raw coverage hash, browser evidence hash, tool versions, and successful command
+exit codes. These generated directories are not part of the source fingerprint.
+Changing source or configuration requires a fresh run. This protects against
+stale evidence and accidental omissions, not a malicious executor that can
+rewrite both the verifier and its evidence. Passing this automated
+gate does not replace dot's independent review, inherited dependency-security
+assessment, server-side research permissions/idempotency work, real-source
+validation, or deployment approval. No real AI E2E is authorized by this gate.
