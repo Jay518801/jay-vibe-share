@@ -1,0 +1,34 @@
+# Optional, UNDEPLOYED preview blueprint. Review billing before applying.
+# No persistent disk: server-side history/reports can be lost on recreation.
+# For durable personal use, prefer the upstream Docker Compose named volumes.
+services:
+  - type: web
+    name: jay-stock-analysis
+    runtime: docker
+    plan: starter
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /live
+    autoDeployTrigger: 'off'
+    envVars:
+      - key: PORT
+        value: '8899'
+      - key: API_AUTH_KEY
+        generateValue: true
+      - key: ENABLE_SESSION_RUNTIME
+        value: 'true'
+      - key: VIBE_TRADING_ENABLE_SHELL_TOOLS
+        value: '0'
+      - key: VIBE_TRADING_ENABLE_SCHEDULER
+        value: '0'
+      - key: VIBE_TRADING_TRUST_DOCKER_LOOPBACK
+        value: '0'
+      - key: LANGCHAIN_PROVIDER
+        value: openai
+      - key: LANGCHAIN_MODEL_NAME
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
